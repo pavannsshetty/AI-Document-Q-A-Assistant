@@ -1,0 +1,6 @@
+{
+  "name": "AI Document Q&A Assistant",
+  "description": "Full-stack local RAG Document Q&A Assistant built with React, Node.js, Express, MongoDB, Qdrant, and Ollama.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
