@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { env } from '../config/env.js';
 import { User } from '../models/User.js';
+import { localUserStore } from '../services/localStoreService.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -32,15 +33,13 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   const token = authHeader.slice(7).trim();
   const decoded = verifyTokenString(token);
 
-  if (mongoose.connection.readyState !== 1) {
-    throw new AppError(
-      'MongoDB connection failed. Ensure MongoDB is running and MONGODB_URI is configured.',
-      503,
-      'MONGODB_UNAVAILABLE'
-    );
+  let user = null;
+  if (mongoose.connection.readyState === 1) {
+    user = await User.findById(decoded.userId).lean();
+  } else {
+    user = localUserStore.findById(decoded.userId);
   }
 
-  const user = await User.findById(decoded.userId).lean();
   if (!user) {
     throw new AppError('Authenticated user account no longer exists.', 401, 'USER_NOT_FOUND');
   }

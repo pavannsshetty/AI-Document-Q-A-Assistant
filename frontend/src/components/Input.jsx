@@ -16,7 +16,7 @@ export const Input = ({
   ...rest
 }) => {
   return (
-    <div className={`w-full ${className}`}>
+    <div className={`w-full min-w-0 ${className}`}>
       {label ? (
         <label
           htmlFor={id}
@@ -29,7 +29,7 @@ export const Input = ({
 
       <div className="relative">
         {Icon ? (
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
             <Icon className="w-4 h-4" />
           </div>
         ) : null}
@@ -42,8 +42,8 @@ export const Input = ({
           placeholder={placeholder}
           required={required}
           disabled={disabled}
-          className={`w-full rounded-lg border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm py-2.5 ${
-            Icon ? 'pl-9 pr-3.5' : 'px-3.5'
+          className={`w-full min-h-[44px] sm:min-h-[40px] rounded-lg border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-base sm:text-sm py-2.5 ${
+            Icon ? 'pl-10 pr-3.5' : 'px-3.5'
           } transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[#0AAF29] focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed ${
             error
               ? 'border-red-500 dark:border-red-500'
@@ -54,9 +54,11 @@ export const Input = ({
       </div>
 
       {error ? (
-        <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-1.5 text-xs text-red-600 dark:text-red-400 break-words">
+          {error}
+        </p>
       ) : helperText ? (
-        <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 break-words">
           {helperText}
         </p>
       ) : null}

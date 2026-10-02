@@ -8,8 +8,10 @@ export const DocumentList = ({
   documents = [],
   onOpenChat,
   onDelete,
+  onReindex = null,
   onOpenUpload,
   chatLoadingId = null,
+  reindexingId = null,
   searchQuery = ''
 }) => {
   if (!Array.isArray(documents) || documents.length === 0) {
@@ -46,7 +48,9 @@ export const DocumentList = ({
           document={doc}
           onOpenChat={onOpenChat}
           onDelete={onDelete}
+          onReindex={onReindex}
           chatLoadingId={chatLoadingId}
+          reindexingId={reindexingId}
         />
       ))}
     </div>

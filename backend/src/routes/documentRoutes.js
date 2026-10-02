@@ -2,6 +2,8 @@ import { Router } from 'express';
 import {
   uploadDocument,
   getDocumentUploadProgress,
+  reindexDocument,
+  reindexAllDocuments,
   getUserDocuments,
   getDocumentById,
   deleteDocument
@@ -15,6 +17,8 @@ router.use(authenticate);
 
 router.get('/upload-progress/:uploadId', getDocumentUploadProgress);
 router.post('/upload', uploadSingleDocument, uploadDocument);
+router.post('/reindex-all', reindexAllDocuments);
+router.post('/:id/reindex', reindexDocument);
 router.get('/', getUserDocuments);
 router.get('/:id', getDocumentById);
 router.delete('/:id', deleteDocument);

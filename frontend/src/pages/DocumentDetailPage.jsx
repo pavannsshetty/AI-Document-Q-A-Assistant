@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { MessageSquare, Trash2, ArrowLeft, Plus } from 'lucide-react';
+import { MessageSquare, Trash2, ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import {
   documentApi,
   chatApi,
@@ -26,6 +26,7 @@ export const DocumentDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [startingChat, setStartingChat] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -74,6 +75,26 @@ export const DocumentDetailPage = () => {
     }
   };
 
+  const handleReindex = async () => {
+    if (!document) {
+      return;
+    }
+    try {
+      setReindexing(true);
+      setError('');
+      const response = await documentApi.reindex(document.id || document._id);
+      if (response?.document) {
+        setDocument(response.document);
+      } else {
+        await loadDocumentDetails();
+      }
+    } catch (err) {
+      setError(extractApiErrorMessage(err, 'Failed to reindex document.'));
+    } finally {
+      setReindexing(false);
+    }
+  };
+
   const handleDeleteDocument = async () => {
     if (!document) {
       return;
@@ -100,22 +121,24 @@ export const DocumentDetailPage = () => {
         document?.processingStatus === 'completed' ? (
           <Button
             variant="primary"
+            size="sm"
             onClick={handleStartNewChat}
             loading={startingChat}
+            className="sm:min-h-[40px] sm:px-4"
           >
-            <MessageSquare className="w-4 h-4" />
+            <MessageSquare className="w-4 h-4 shrink-0" />
             <span>Start Chat</span>
           </Button>
         ) : null
       }
     >
-      <div className="p-6 max-w-5xl w-full mx-auto space-y-6">
+      <div className="p-4 sm:p-6 max-w-5xl w-full mx-auto space-y-5 sm:space-y-6 pb-safe">
         <div>
           <Link
             to="/dashboard"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 mb-3"
+            className="inline-flex items-center gap-1.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
+            <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
             <span>Back to Documents</span>
           </Link>
         </div>
@@ -130,10 +153,10 @@ export const DocumentDetailPage = () => {
           <LoadingSpinner label="Loading document metadata..." />
         ) : document ? (
           <>
-            <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
+            <div className="p-4 sm:p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-5 sm:space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
                 <div className="min-w-0">
-                  <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 break-words">
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 break-words overflow-wrap-anywhere">
                     {document.originalName}
                   </h1>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 mt-1.5">
@@ -159,33 +182,48 @@ export const DocumentDetailPage = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
                   <Button
                     variant="primary"
-                    disabled={document.processingStatus !== 'completed'}
+                    size="sm"
+                    disabled={document.processingStatus !== 'completed' || reindexing}
                     loading={startingChat}
                     onClick={handleStartNewChat}
+                    className="flex-1 sm:flex-initial"
                   >
-                    <MessageSquare className="w-4 h-4" />
+                    <MessageSquare className="w-4 h-4 shrink-0" />
                     <span>Start Chat</span>
                   </Button>
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={document.processingStatus === 'processing'}
+                    loading={reindexing}
+                    onClick={handleReindex}
+                    className="flex-1 sm:flex-initial"
+                  >
+                    <RefreshCw className="w-4 h-4 shrink-0" />
+                    <span>Reindex</span>
+                  </Button>
+                  <Button
                     variant="outline"
+                    size="sm"
+                    disabled={reindexing}
                     onClick={() => setDeleteModalOpen(true)}
                     className="text-red-600 hover:text-red-700 dark:text-red-400"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4 shrink-0" />
                     <span>Delete</span>
                   </Button>
                 </div>
               </div>
 
-              <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <div className="min-w-0">
                   <dt className="text-xs text-slate-500 dark:text-slate-400 mb-1">
                     Document Name
                   </dt>
-                  <dd className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                  <dd className="text-sm font-medium text-slate-900 dark:text-slate-100 break-words overflow-wrap-anywhere">
                     {document.originalName}
                   </dd>
                 </div>
@@ -247,16 +285,16 @@ export const DocumentDetailPage = () => {
 
               {document.errorMessage ? (
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-                  <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                  <p className="text-xs font-medium text-red-600 dark:text-red-400 break-words">
                     Processing Error: {document.errorMessage}
                   </p>
                 </div>
               ) : null}
             </div>
 
-            <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
+            <div className="p-4 sm:p-6 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0">
                   <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                     Conversations for this Document
                   </h2>
@@ -271,8 +309,9 @@ export const DocumentDetailPage = () => {
                     size="sm"
                     onClick={handleStartNewChat}
                     loading={startingChat}
+                    className="self-start sm:self-auto"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
                     <span>New Conversation</span>
                   </Button>
                 ) : null}
@@ -287,12 +326,12 @@ export const DocumentDetailPage = () => {
                   {conversations.map((conv) => (
                     <div
                       key={conv.id || conv._id}
-                      className="flex items-center justify-between py-3 gap-4"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between py-3.5 gap-3"
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <Link
                           to={`/chat/${conv.id || conv._id}`}
-                          className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:text-[#0AAF29] dark:hover:text-[#0AAF29] truncate block"
+                          className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:text-[#0AAF29] dark:hover:text-[#0AAF29] break-words line-clamp-1 block"
                         >
                           {conv.title}
                         </Link>
@@ -305,6 +344,7 @@ export const DocumentDetailPage = () => {
                         variant="outline"
                         size="sm"
                         onClick={() => navigate(`/chat/${conv.id || conv._id}`)}
+                        className="w-full sm:w-auto"
                       >
                         Open Chat
                       </Button>

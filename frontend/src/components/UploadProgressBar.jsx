@@ -69,9 +69,9 @@ export const UploadProgressBar = ({
   }
 
   return (
-    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
+    <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5 sm:space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
             {isFailed
               ? 'Processing Interrupted'
@@ -79,7 +79,7 @@ export const UploadProgressBar = ({
               ? 'Indexing Complete'
               : 'RAG Processing Pipeline'}
           </p>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed break-words overflow-wrap-anywhere">
             {message}
           </p>
         </div>
@@ -137,7 +137,7 @@ export const UploadProgressBar = ({
         ) : null}
       </div>
 
-      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-5 gap-2">
+      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
         {PIPELINE_STEPS.map((step, index) => {
           const isStepDone = isCompleted || (!isFailed && index < activeStageIndex);
           const isStepCurrent = !isCompleted && index === activeStageIndex;

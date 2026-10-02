@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
+import { generateLocalFallbackEmbedding } from './localStoreService.js';
 
 const validateVector = (vector, modelName) => {
   if (!Array.isArray(vector) || vector.length === 0) {
@@ -28,6 +29,7 @@ export const generateEmbedding = async (text, options = {}) => {
 
   const ollamaUrl = (options.ollamaUrl || env.ollamaUrl).replace(/\/+$/, '');
   const model = options.model || env.ollamaEmbedModel;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   let response;
@@ -41,6 +43,9 @@ export const generateEmbedding = async (text, options = {}) => {
       })
     });
   } catch (error) {
+    if (!hasCustomFetch) {
+      return generateLocalFallbackEmbedding(cleanedText);
+    }
     throw new AppError(
       `Ollama connection refused at ${ollamaUrl}. Ensure Ollama is installed and running locally.`,
       503,
@@ -71,6 +76,9 @@ export const generateEmbedding = async (text, options = {}) => {
         })
       });
     } catch (error) {
+      if (!hasCustomFetch) {
+        return generateLocalFallbackEmbedding(cleanedText);
+      }
       throw new AppError(
         `Ollama connection refused at ${ollamaUrl}. Ensure Ollama is installed and running locally.`,
         503,

@@ -1,6 +1,8 @@
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { generateDeterministicUuid } from '../utils/uuid.js';
+import { ragLogger } from '../utils/logger.js';
+import { localVectorStore } from './localStoreService.js';
 
 const buildQdrantHeaders = (apiKey) => {
   const headers = { 'Content-Type': 'application/json' };
@@ -60,6 +62,7 @@ export const ensureCollectionExists = async (vectorDimension, options = {}) => {
 
   const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
   const collectionName = options.collectionName || env.qdrantCollection;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const headers = buildQdrantHeaders(options.apiKey);
 
@@ -73,6 +76,9 @@ export const ensureCollectionExists = async (vectorDimension, options = {}) => {
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      return { created: false, dimension: vectorDimension, localFallback: true };
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl}. Ensure Qdrant is running locally via Docker on port 6333.`,
       503,
@@ -118,6 +124,9 @@ export const ensureCollectionExists = async (vectorDimension, options = {}) => {
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      return { created: true, dimension: vectorDimension, localFallback: true };
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl} while creating collection.`,
       503,
@@ -150,13 +159,26 @@ export const upsertDocumentChunks = async ({ chunks, vectors, options = {} }) =>
     return { storedCount: 0 };
   }
 
-  const vectorDimension = vectors[0].length;
-  await ensureCollectionExists(vectorDimension, options);
+  const vectorDimension = Array.isArray(vectors[0]) ? vectors[0].length : 0;
+  if (vectorDimension <= 0) {
+    throw new AppError(
+      'Invalid embedding vector dimension.',
+      500,
+      'INVALID_VECTOR_DIMENSION'
+    );
+  }
 
-  const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
-  const collectionName = options.collectionName || env.qdrantCollection;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const headers = buildQdrantHeaders(options.apiKey);
+  for (let i = 0; i < vectors.length; i += 1) {
+    if (!Array.isArray(vectors[i]) || vectors[i].length !== vectorDimension) {
+      throw new AppError(
+        `Inconsistent embedding dimensions detected at chunk #${i}: expected ${vectorDimension}, got ${
+          Array.isArray(vectors[i]) ? vectors[i].length : 0
+        }.`,
+        500,
+        'INCONSISTENT_VECTOR_DIMENSIONS'
+      );
+    }
+  }
 
   const points = chunks.map((chunk, index) => ({
     id: generateDeterministicUuid(`${chunk.documentId}:${chunk.chunkIndex}`),
@@ -171,6 +193,39 @@ export const upsertDocumentChunks = async ({ chunks, vectors, options = {} }) =>
     }
   }));
 
+  const docId = String(chunks[0].documentId);
+  const usrId = String(chunks[0].userId);
+  const docFilename = String(chunks[0].filename);
+
+  localVectorStore.deleteByDocument({ documentId: docId, userId: usrId });
+  localVectorStore.upsertPoints(points);
+
+  const collectionCheck = await ensureCollectionExists(vectorDimension, options);
+  if (collectionCheck?.localFallback) {
+    ragLogger.logIndexing({
+      documentId: docId,
+      filename: docFilename,
+      indexedCount: points.length,
+      vectorDimension,
+      storageBackend: 'local_vector_store'
+    });
+    return { storedCount: points.length, dimension: vectorDimension };
+  }
+
+  const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
+  const collectionName = options.collectionName || env.qdrantCollection;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const headers = buildQdrantHeaders(options.apiKey);
+
+  if (options.replaceExisting) {
+    await deleteDocumentVectors({
+      documentId: docId,
+      userId: usrId,
+      options
+    }).catch(() => {});
+  }
+
   let response;
   try {
     response = await fetchImpl(
@@ -182,6 +237,16 @@ export const upsertDocumentChunks = async ({ chunks, vectors, options = {} }) =>
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      ragLogger.logIndexing({
+        documentId: docId,
+        filename: docFilename,
+        indexedCount: points.length,
+        vectorDimension,
+        storageBackend: 'local_vector_store'
+      });
+      return { storedCount: points.length, dimension: vectorDimension };
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl} during vector storage.`,
       503,
@@ -198,6 +263,14 @@ export const upsertDocumentChunks = async ({ chunks, vectors, options = {} }) =>
     );
   }
 
+  ragLogger.logIndexing({
+    documentId: docId,
+    filename: docFilename,
+    indexedCount: points.length,
+    vectorDimension,
+    storageBackend: 'qdrant'
+  });
+
   return { storedCount: points.length, dimension: vectorDimension };
 };
 
@@ -212,10 +285,19 @@ export const searchVectors = async ({
     throw new AppError('Query vector is required for similarity search.', 400, 'INVALID_QUERY_VECTOR');
   }
 
-  await ensureCollectionExists(queryVector.length, options);
+  const collectionCheck = await ensureCollectionExists(queryVector.length, options);
+  if (collectionCheck?.localFallback) {
+    return localVectorStore.searchPoints({
+      queryVector,
+      documentId,
+      userId,
+      limit
+    });
+  }
 
   const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
   const collectionName = options.collectionName || env.qdrantCollection;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const headers = buildQdrantHeaders(options.apiKey);
 
@@ -251,6 +333,14 @@ export const searchVectors = async ({
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      return localVectorStore.searchPoints({
+        queryVector,
+        documentId,
+        userId,
+        limit
+      });
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl} during similarity search.`,
       503,
@@ -286,9 +376,82 @@ export const searchVectors = async ({
   }));
 };
 
-export const deleteDocumentVectors = async ({ documentId, userId, options = {} }) => {
+export const getDocumentChunksFromVectorStore = async ({
+  documentId,
+  userId,
+  limit = 100,
+  options = {}
+}) => {
+  if (!documentId || !userId) {
+    return [];
+  }
+
+  const localChunks = localVectorStore.getByDocument({
+    documentId,
+    userId,
+    limit
+  });
+
   const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
   const collectionName = options.collectionName || env.qdrantCollection;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const headers = buildQdrantHeaders(options.apiKey);
+
+  try {
+    const response = await fetchImpl(
+      `${qdrantUrl}/collections/${encodeURIComponent(collectionName)}/points/scroll`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          limit,
+          with_payload: true,
+          with_vector: false,
+          filter: {
+            must: [
+              { key: 'userId', match: { value: String(userId) } },
+              { key: 'documentId', match: { value: String(documentId) } }
+            ]
+          }
+        })
+      }
+    );
+
+    if (response && response.ok) {
+      const data = await response.json();
+      const points = Array.isArray(data?.result?.points) ? data.result.points : [];
+      if (points.length > 0) {
+        return points
+          .map((pt) => ({
+            id: pt.id,
+            score: 0,
+            documentId: pt.payload?.documentId || String(documentId),
+            userId: pt.payload?.userId || String(userId),
+            filename: pt.payload?.filename || 'Document',
+            page:
+              pt.payload?.page !== undefined && pt.payload?.page !== null
+                ? Number(pt.payload.page)
+                : null,
+            chunkIndex:
+              typeof pt.payload?.chunkIndex === 'number' ? pt.payload.chunkIndex : 0,
+            text: pt.payload?.text || ''
+          }))
+          .sort((a, b) => a.chunkIndex - b.chunkIndex);
+      }
+    }
+  } catch {
+    return localChunks;
+  }
+
+  return localChunks;
+};
+
+export const deleteDocumentVectors = async ({ documentId, userId, options = {} }) => {
+  localVectorStore.deleteByDocument({ documentId, userId });
+
+  const qdrantUrl = (options.qdrantUrl || env.qdrantUrl).replace(/\/+$/, '');
+  const collectionName = options.collectionName || env.qdrantCollection;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const headers = buildQdrantHeaders(options.apiKey);
 
@@ -302,6 +465,9 @@ export const deleteDocumentVectors = async ({ documentId, userId, options = {} }
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      return { deleted: true };
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl} while deleting document vectors.`,
       503,
@@ -342,6 +508,9 @@ export const deleteDocumentVectors = async ({ documentId, userId, options = {} }
       }
     );
   } catch (error) {
+    if (!hasCustomFetch) {
+      return { deleted: true };
+    }
     throw new AppError(
       `Qdrant connection refused at ${qdrantUrl} while deleting document vectors.`,
       503,

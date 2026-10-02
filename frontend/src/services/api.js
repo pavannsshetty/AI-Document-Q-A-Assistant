@@ -28,10 +28,30 @@ export const getStoredUser = () => {
   }
 };
 
-const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+const resolveApiBaseUrl = () => {
+  const rawEnvUrl = String(import.meta.env.VITE_API_URL || '').trim();
+  if (!rawEnvUrl || rawEnvUrl.startsWith('MY_')) {
+    return '/api';
+  }
+
+  if (typeof window !== 'undefined') {
+    const { hostname, port } = window.location;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    if (!isLocalhost && (rawEnvUrl.includes('localhost') || rawEnvUrl.includes('127.0.0.1'))) {
+      return '/api';
+    }
+
+    if (isLocalhost && port !== '5173' && rawEnvUrl.includes('localhost:5000')) {
+      return '/api';
+    }
+  }
+
+  return rawEnvUrl;
+};
 
 const api = axios.create({
-  baseURL: apiBaseUrl,
+  baseURL: resolveApiBaseUrl(),
   timeout: 180000
 });
 
@@ -48,9 +68,22 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalConfig = error.config;
+    if (
+      originalConfig &&
+      !error.response &&
+      !originalConfig._retriedWithRelativeApi &&
+      originalConfig.baseURL !== '/api'
+    ) {
+      originalConfig._retriedWithRelativeApi = true;
+      originalConfig.baseURL = '/api';
+      api.defaults.baseURL = '/api';
+      return api.request(originalConfig);
+    }
+
     const status = error.response?.status;
-    const requestUrl = String(error.config?.url || '');
+    const requestUrl = String(originalConfig?.url || '');
     const isAuthAttempt =
       requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
 
@@ -130,6 +163,14 @@ export const documentApi = {
   },
   getById: async (id) => {
     const { data } = await api.get(`/documents/${id}`);
+    return data;
+  },
+  reindex: async (id) => {
+    const { data } = await api.post(`/documents/${id}/reindex`);
+    return data;
+  },
+  reindexAll: async () => {
+    const { data } = await api.post('/documents/reindex-all');
     return data;
   },
   remove: async (id) => {

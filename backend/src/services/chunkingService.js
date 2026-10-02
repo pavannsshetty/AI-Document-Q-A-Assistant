@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { ragLogger } from '../utils/logger.js';
 
 export const splitTextIntoChunks = (text, options = {}) => {
   const chunkSize = options.chunkSize || env.chunkSize || 800;
@@ -24,7 +25,7 @@ export const splitTextIntoChunks = (text, options = {}) => {
 
     if (endIndex < normalized.length) {
       const slice = normalized.slice(startIndex, endIndex);
-      const minBreakOffset = Math.floor(chunkSize * 0.55);
+      const minBreakOffset = Math.floor(chunkSize * 0.5);
 
       const paragraphBreak = slice.lastIndexOf('\n\n');
       const newlineBreak = slice.lastIndexOf('\n');
@@ -37,10 +38,10 @@ export const splitTextIntoChunks = (text, options = {}) => {
 
       if (paragraphBreak >= minBreakOffset) {
         endIndex = startIndex + paragraphBreak + 2;
-      } else if (sentenceBreak >= minBreakOffset) {
-        endIndex = startIndex + sentenceBreak + 2;
       } else if (newlineBreak >= minBreakOffset) {
         endIndex = startIndex + newlineBreak + 1;
+      } else if (sentenceBreak >= minBreakOffset) {
+        endIndex = startIndex + sentenceBreak + 2;
       } else if (spaceBreak >= minBreakOffset) {
         endIndex = startIndex + spaceBreak + 1;
       }
@@ -99,6 +100,12 @@ export const createDocumentChunks = ({
       globalChunkIndex += 1;
     }
   }
+
+  ragLogger.logChunking({
+    documentId,
+    filename,
+    chunkCount: resultChunks.length
+  });
 
   return resultChunks;
 };

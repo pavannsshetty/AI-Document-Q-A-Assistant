@@ -9,9 +9,9 @@ export const ChatMessage = ({ message }) => {
     <div
       className={`flex flex-col ${
         isUser ? 'items-end' : 'items-start'
-      } w-full`}
+      } w-full min-w-0`}
     >
-      <div className="flex items-center gap-2 mb-1 text-xs text-slate-500 dark:text-slate-400">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1 text-xs text-slate-500 dark:text-slate-400 px-0.5">
         <span className="font-medium text-slate-700 dark:text-slate-300">
           {isUser ? 'You' : 'Document Q&A Assistant'}
         </span>
@@ -24,13 +24,15 @@ export const ChatMessage = ({ message }) => {
       </div>
 
       <div
-        className={`max-w-3xl rounded-xl px-4 py-3 text-sm leading-relaxed ${
+        className={`max-w-[92%] sm:max-w-[85%] md:max-w-3xl min-w-0 rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-sm leading-relaxed ${
           isUser
             ? 'bg-[#0AAF29] text-white'
             : 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800'
         }`}
       >
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+          {message.content}
+        </div>
         {!isUser && Array.isArray(message.sources) && message.sources.length > 0 ? (
           <SourceReference sources={message.sources} />
         ) : null}

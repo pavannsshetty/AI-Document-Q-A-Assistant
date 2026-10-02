@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Search, FileUp } from 'lucide-react';
+import { Upload, Search, FileUp, RefreshCw } from 'lucide-react';
 import {
   documentApi,
   chatApi,
@@ -49,6 +49,8 @@ export const DashboardPage = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [chatLoadingId, setChatLoadingId] = useState(null);
+  const [reindexingId, setReindexingId] = useState(null);
+  const [reindexingAll, setReindexingAll] = useState(false);
 
   const pollIntervalRef = useRef(null);
 
@@ -293,6 +295,46 @@ export const DashboardPage = () => {
     }
   };
 
+  const handleReindexDocument = async (document) => {
+    const docId = document.id || document._id;
+    try {
+      setReindexingId(docId);
+      setError('');
+      const response = await documentApi.reindex(docId);
+      if (response?.document) {
+        setDocuments((prev) =>
+          prev.map((item) =>
+            (item.id || item._id) === docId ? response.document : item
+          )
+        );
+      } else {
+        await fetchDocuments();
+      }
+    } catch (err) {
+      setError(
+        extractApiErrorMessage(err, 'Failed to reindex document.')
+      );
+      await fetchDocuments();
+    } finally {
+      setReindexingId(null);
+    }
+  };
+
+  const handleReindexAllDocuments = async () => {
+    try {
+      setReindexingAll(true);
+      setError('');
+      await documentApi.reindexAll();
+      await fetchDocuments();
+    } catch (err) {
+      setError(
+        extractApiErrorMessage(err, 'Failed to reindex all documents.')
+      );
+    } finally {
+      setReindexingAll(false);
+    }
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget) {
       return;
@@ -317,33 +359,52 @@ export const DashboardPage = () => {
     <AppLayout
       breadcrumbs={[{ label: 'Documents' }]}
       headerAction={
-        <Button
-          variant="primary"
-          size="md"
-          onClick={() => {
-            setSelectedFile(null);
-            setUploadError('');
-            setUploadProgress(INITIAL_PROGRESS_STATE);
-            setUploadModalOpen(true);
-          }}
-        >
-          <Upload className="w-4 h-4" />
-          <span>Upload Document</span>
-        </Button>
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {documents.length > 0 ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={reindexingAll}
+              disabled={reindexingAll || uploading}
+              onClick={handleReindexAllDocuments}
+              aria-label="Reindex all documents"
+              className="sm:min-h-[40px] sm:px-3.5"
+            >
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span className="hidden md:inline">Reindex All</span>
+            </Button>
+          ) : null}
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setSelectedFile(null);
+              setUploadError('');
+              setUploadProgress(INITIAL_PROGRESS_STATE);
+              setUploadModalOpen(true);
+            }}
+            className="sm:min-h-[40px] sm:px-4"
+          >
+            <Upload className="w-4 h-4 shrink-0" />
+            <span className="sm:hidden">Upload</span>
+            <span className="hidden sm:inline">Upload Document</span>
+          </Button>
+        </div>
       }
     >
-      <div className="p-6 max-w-7xl w-full mx-auto space-y-6">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+      <div className="p-4 sm:p-6 max-w-7xl w-full mx-auto space-y-5 sm:space-y-6 pb-safe">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 sm:gap-4 pb-4 sm:pb-5 border-b border-slate-200 dark:border-slate-800">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
               Document Knowledge Base
             </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
               Upload PDF, DOCX, and TXT files to index embeddings locally in Qdrant and query with Ollama.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400 shrink-0">
             <span className="tabular-nums">
               <strong className="font-semibold text-slate-900 dark:text-slate-100">
                 {formatNumber(documents.length)}
@@ -366,8 +427,8 @@ export const DashboardPage = () => {
           onRetry={fetchDocuments}
         />
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          <div className="w-full sm:max-w-sm">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
+          <div className="w-full md:max-w-sm">
             <Input
               id="document-search"
               type="search"
@@ -378,7 +439,11 @@ export const DashboardPage = () => {
             />
           </div>
 
-          <div className="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
+          <div
+            role="tablist"
+            aria-label="Filter documents by processing status"
+            className="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 w-full md:w-auto overflow-x-auto no-scrollbar"
+          >
             {[
               { id: 'all', label: 'All' },
               { id: 'completed', label: 'Completed' },
@@ -388,8 +453,10 @@ export const DashboardPage = () => {
               <button
                 key={tab.id}
                 type="button"
+                role="tab"
+                aria-selected={statusFilter === tab.id}
                 onClick={() => setStatusFilter(tab.id)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                className={`flex-1 md:flex-initial min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
                   statusFilter === tab.id
                     ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
@@ -408,6 +475,7 @@ export const DashboardPage = () => {
             documents={filteredDocuments}
             onOpenChat={handleOpenChat}
             onDelete={(doc) => setDeleteTarget(doc)}
+            onReindex={handleReindexDocument}
             onOpenUpload={() => {
               setSelectedFile(null);
               setUploadError('');
@@ -415,6 +483,7 @@ export const DashboardPage = () => {
               setUploadModalOpen(true);
             }}
             chatLoadingId={chatLoadingId}
+            reindexingId={reindexingId}
             searchQuery={searchQuery}
           />
         )}
@@ -461,20 +530,20 @@ export const DashboardPage = () => {
 
           <label
             htmlFor="document-file-input"
-            className={`flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl transition-colors bg-slate-50/60 dark:bg-slate-950/40 text-center ${
+            className={`flex flex-col items-center justify-center p-4 sm:p-6 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl transition-colors bg-slate-50/60 dark:bg-slate-950/40 text-center min-w-0 ${
               uploading
                 ? 'opacity-60 cursor-not-allowed'
                 : 'cursor-pointer hover:border-[#0AAF29] dark:hover:border-[#0AAF29]'
             }`}
           >
-            <FileUp className="w-8 h-8 text-[#0AAF29] mb-2.5" />
-            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+            <FileUp className="w-7 h-7 sm:w-8 sm:h-8 text-[#0AAF29] mb-2 sm:mb-2.5 shrink-0" />
+            <span className="text-xs sm:text-sm font-medium text-slate-900 dark:text-slate-100 max-w-full break-all sm:break-words px-2">
               {selectedFile ? selectedFile.name : 'Choose a PDF, DOCX, or TXT file'}
             </span>
             <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
               {selectedFile
                 ? `${formatFileSize(selectedFile.size)} selected`
-                : 'Supported formats: .pdf, .docx, .txt · Maximum size: 20 MB'}
+                : 'Supported formats: .pdf, .docx, .txt · Max: 20 MB'}
             </span>
             <input
               id="document-file-input"
@@ -528,9 +597,9 @@ export const DashboardPage = () => {
           </>
         }
       >
-        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed break-words">
           Are you sure you want to delete{' '}
-          <strong className="font-semibold text-slate-900 dark:text-white">
+          <strong className="font-semibold text-slate-900 dark:text-white break-all sm:break-words">
             {deleteTarget?.originalName}
           </strong>
           ? This will permanently remove its vector embeddings from Qdrant as well as all associated conversations and messages from MongoDB.

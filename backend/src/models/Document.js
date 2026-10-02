@@ -1,5 +1,19 @@
 import mongoose from 'mongoose';
 
+const pageTextSubSchema = new mongoose.Schema(
+  {
+    page: {
+      type: Number,
+      default: null
+    },
+    text: {
+      type: String,
+      required: true
+    }
+  },
+  { _id: false }
+);
+
 const documentSchema = new mongoose.Schema(
   {
     userId: {
@@ -29,6 +43,11 @@ const documentSchema = new mongoose.Schema(
     extractedTextLength: {
       type: Number,
       default: 0
+    },
+    extractedPages: {
+      type: [pageTextSubSchema],
+      default: [],
+      select: false
     },
     chunkCount: {
       type: Number,

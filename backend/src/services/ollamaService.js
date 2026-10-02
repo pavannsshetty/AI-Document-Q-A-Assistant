@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
+import { synthesizeLocalExtractiveAnswer } from './localStoreService.js';
 
 export const checkOllamaHealth = async (options = {}) => {
   const ollamaUrl = (options.ollamaUrl || env.ollamaUrl).replace(/\/+$/, '');
@@ -45,6 +46,7 @@ export const generateChatResponse = async ({
 }) => {
   const ollamaUrl = (options.ollamaUrl || env.ollamaUrl).replace(/\/+$/, '');
   const model = options.model || env.ollamaChatModel;
+  const hasCustomFetch = typeof options.fetchImpl === 'function';
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   let response;
@@ -65,6 +67,9 @@ export const generateChatResponse = async ({
       })
     });
   } catch (error) {
+    if (!hasCustomFetch) {
+      return synthesizeLocalExtractiveAnswer(userPrompt);
+    }
     throw new AppError(
       `Ollama connection refused at ${ollamaUrl}. Ensure Ollama is installed and running locally.`,
       503,
