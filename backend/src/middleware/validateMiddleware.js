@@ -7,21 +7,39 @@ export const validateObjectId = (id, label = 'Resource ID') => {
   }
 };
 
-export const validateRegisterInput = ({ name, email, password }) => {
-  const trimmedName = String(name || '').trim();
-  const trimmedEmail = String(email || '').trim().toLowerCase();
-  const rawPassword = String(password || '');
+export const validateRegisterInput = (payload = {}) => {
+  const rawName = payload?.name;
+  const rawEmail = payload?.email;
+  const rawPassword =
+    typeof payload?.password === 'string'
+      ? payload.password
+      : String(payload?.password ?? '');
+
+  const trimmedName = String(rawName ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const trimmedEmail = String(rawEmail ?? '')
+    .trim()
+    .toLowerCase();
 
   if (!trimmedName || trimmedName.length < 2) {
     throw new AppError('Name must be at least 2 characters long.', 400, 'VALIDATION_ERROR');
   }
 
-  if (!trimmedEmail || !/^\S+@\S+\.\S+$/.test(trimmedEmail)) {
+  if (trimmedName.length > 80) {
+    throw new AppError('Name cannot exceed 80 characters.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     throw new AppError('Please provide a valid email address.', 400, 'VALIDATION_ERROR');
   }
 
   if (!rawPassword || rawPassword.length < 6) {
     throw new AppError('Password must be at least 6 characters long.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (rawPassword.length > 128) {
+    throw new AppError('Password cannot exceed 128 characters.', 400, 'VALIDATION_ERROR');
   }
 
   return {
@@ -31,12 +49,21 @@ export const validateRegisterInput = ({ name, email, password }) => {
   };
 };
 
-export const validateLoginInput = ({ email, password }) => {
-  const trimmedEmail = String(email || '').trim().toLowerCase();
-  const rawPassword = String(password || '');
+export const validateLoginInput = (payload = {}) => {
+  const trimmedEmail = String(payload?.email ?? '')
+    .trim()
+    .toLowerCase();
+  const rawPassword =
+    typeof payload?.password === 'string'
+      ? payload.password
+      : String(payload?.password ?? '');
 
   if (!trimmedEmail || !rawPassword) {
     throw new AppError('Email and password are required.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    throw new AppError('Please provide a valid email address.', 400, 'VALIDATION_ERROR');
   }
 
   return {

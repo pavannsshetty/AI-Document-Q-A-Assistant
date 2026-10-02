@@ -44,8 +44,12 @@ import {
 import {
   extractCandidateIdentityFromText,
   analyzeQuestionIntent,
-  synthesizeLocalExtractiveAnswer
+  synthesizeLocalExtractiveAnswer,
+  localUserStore
 } from '../src/services/localStoreService.js';
+import { createApiApp } from '../src/app.js';
+import { User, BCRYPT_HASH_REGEX } from '../src/models/User.js';
+import { errorHandler } from '../src/middleware/errorMiddleware.js';
 import { NOT_FOUND_MESSAGE } from '../src/prompts/ragPrompt.js';
 
 test('1. User registration validation and bcrypt password hashing', async () => {
@@ -1076,4 +1080,184 @@ test('23. Handles actual Real SQL Interview Questions.pdf with raw SQL queries w
 
   assert.equal(askCandidateName.answer, NOT_FOUND_MESSAGE);
   assert.deepEqual(askCandidateName.sources, []);
+});
+
+test('24. Complete authentication & persistence flow: register, normalize email, hash password, login, duplicate check, wrong password, invalid fields, and session verification', async () => {
+  localUserStore.clearTestUsers();
+
+  // Verify Mongoose User schema configuration & collection name
+  assert.equal(User.collection.collectionName, 'users');
+  const tempUserDoc = new User({
+    name: '  Pavan Kumar Shetty  ',
+    email: '  ShettyPavan524@Gmail.COM ',
+    password: 'SecretPassword123!'
+  });
+  await tempUserDoc.validate();
+  assert.equal(tempUserDoc.email, 'shettypavan524@gmail.com');
+  assert.equal(tempUserDoc.name, 'Pavan Kumar Shetty');
+
+  const app = createApiApp();
+  const server = app.listen(0);
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}/api`;
+
+  try {
+    // 1. Register a new user with mixed-case email and extra whitespace
+    const registerRes = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '  Pavan Kumar Shetty  ',
+        email: '  Pavan.AuthTest@Example.COM  ',
+        password: 'MySecurePassword123'
+      })
+    });
+    const registerBody = await registerRes.json();
+
+    assert.equal(registerRes.status, 201);
+    assert.equal(registerBody.success, true);
+    assert.ok(typeof registerBody.token === 'string' && registerBody.token.length > 20);
+    assert.equal(registerBody.user.name, 'Pavan Kumar Shetty');
+    assert.equal(registerBody.user.email, 'pavan.authtest@example.com');
+    assert.equal(registerBody.user.password, undefined);
+
+    // 2. Verify that the user record exists in the persistent store with bcrypt hash (never plain-text)
+    const storedRecord = localUserStore.findByEmail('PAVAN.AUTHTEST@EXAMPLE.COM');
+    assert.ok(storedRecord);
+    assert.equal(storedRecord.email, 'pavan.authtest@example.com');
+    assert.notEqual(storedRecord.password, 'MySecurePassword123');
+    assert.equal(BCRYPT_HASH_REGEX.test(storedRecord.password), true);
+
+    // 3. Log in with the correct credentials (using mixed-case/whitespace email to test normalization)
+    const loginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: '  PAVAN.AuthTest@example.com ',
+        password: 'MySecurePassword123'
+      })
+    });
+    const loginBody = await loginRes.json();
+
+    assert.equal(loginRes.status, 200);
+    assert.equal(loginBody.success, true);
+    assert.ok(typeof loginBody.token === 'string' && loginBody.token.length > 20);
+    assert.equal(loginBody.user.id, registerBody.user.id);
+    assert.equal(loginBody.user.email, 'pavan.authtest@example.com');
+
+    // 4. Verify protected /api/auth/me endpoint works with the issued JWT token
+    const meRes = await fetch(`${baseUrl}/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${loginBody.token}`
+      }
+    });
+    const meBody = await meRes.json();
+    assert.equal(meRes.status, 200);
+    assert.equal(meBody.success, true);
+    assert.equal(meBody.user.id, registerBody.user.id);
+    assert.equal(meBody.user.email, 'pavan.authtest@example.com');
+
+    // 5. Attempt login with an incorrect password
+    const wrongPassRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'pavan.authtest@example.com',
+        password: 'WrongPassword999'
+      })
+    });
+    const wrongPassBody = await wrongPassRes.json();
+    assert.equal(wrongPassRes.status, 401);
+    assert.equal(wrongPassBody.success, false);
+    assert.equal(wrongPassBody.code, 'INVALID_CREDENTIALS');
+    assert.equal(wrongPassBody.message, 'Invalid email or password.');
+
+    // 6. Register the same email twice (even with different casing)
+    const duplicateRes = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Another Name',
+        email: 'PAVAN.AUTHTEST@EXAMPLE.COM',
+        password: 'AnotherPassword123'
+      })
+    });
+    const duplicateBody = await duplicateRes.json();
+    assert.equal(duplicateRes.status, 409);
+    assert.equal(duplicateBody.success, false);
+    assert.equal(duplicateBody.code, 'EMAIL_ALREADY_EXISTS');
+
+    // 7. Submit invalid or empty form fields
+    const invalidRegRes = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'A',
+        email: 'not-an-email',
+        password: '123'
+      })
+    });
+    const invalidRegBody = await invalidRegRes.json();
+    assert.equal(invalidRegRes.status, 400);
+    assert.equal(invalidRegBody.success, false);
+    assert.equal(invalidRegBody.code, 'VALIDATION_ERROR');
+
+    const emptyLoginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: '',
+        password: ''
+      })
+    });
+    const emptyLoginBody = await emptyLoginRes.json();
+    assert.equal(emptyLoginRes.status, 400);
+    assert.equal(emptyLoginBody.success, false);
+    assert.equal(emptyLoginBody.code, 'VALIDATION_ERROR');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  // 8. Simulate backend restart with a fresh Express server instance and log in again
+  const restartedApp = createApiApp();
+  const restartedServer = restartedApp.listen(0);
+  const { port: newPort } = restartedServer.address();
+  const restartedBaseUrl = `http://127.0.0.1:${newPort}/api`;
+
+  try {
+    const reloginRes = await fetch(`${restartedBaseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'pavan.authtest@example.com',
+        password: 'MySecurePassword123'
+      })
+    });
+    const reloginBody = await reloginRes.json();
+    assert.equal(reloginRes.status, 200);
+    assert.equal(reloginBody.success, true);
+    assert.equal(reloginBody.user.email, 'pavan.authtest@example.com');
+
+    // 9. Verify MongoDB unavailable error handling in errorMiddleware
+    let statusCodeCaptured = null;
+    let jsonBodyCaptured = null;
+    const mockRes = {
+      status(code) {
+        statusCodeCaptured = code;
+        return this;
+      },
+      json(payload) {
+        jsonBodyCaptured = payload;
+        return this;
+      }
+    };
+    const mongoUnavailableErr = new Error('Server selection timed out');
+    mongoUnavailableErr.name = 'MongooseServerSelectionError';
+    errorHandler(mongoUnavailableErr, {}, mockRes, () => {});
+    assert.equal(statusCodeCaptured, 503);
+    assert.equal(jsonBodyCaptured.code, 'MONGODB_CONNECTION_FAILED');
+  } finally {
+    await new Promise((resolve) => restartedServer.close(resolve));
+    localUserStore.clearTestUsers();
+  }
 });

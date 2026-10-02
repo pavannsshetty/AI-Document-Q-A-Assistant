@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.js';
 import { extractApiErrorMessage } from '../services/api.js';
@@ -15,24 +15,37 @@ export const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (loading || submittingRef.current) {
+      return;
+    }
     setError('');
 
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
       setError('Please enter both your email address and password.');
       return;
     }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
     try {
+      submittingRef.current = true;
       setLoading(true);
-      await login({ email: trimmedEmail, password });
-      navigate('/dashboard');
+      const result = await login({ email: normalizedEmail, password });
+      if (result?.token && result?.user) {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       setError(extractApiErrorMessage(err, 'Login failed. Check your credentials.'));
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };

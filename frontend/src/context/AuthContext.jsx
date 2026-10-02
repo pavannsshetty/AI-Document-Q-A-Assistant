@@ -67,7 +67,11 @@ export const AuthProvider = ({ children }) => {
   }, [logout]);
 
   const login = async ({ email, password }) => {
-    const data = await authApi.login({ email, password });
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    const data = await authApi.login({ email: normalizedEmail, password });
+    if (!data?.token || !data?.user) {
+      throw new Error('Authentication failed: invalid session response.');
+    }
     setStoredAuth(data.token, data.user);
     setToken(data.token);
     setUser(data.user);
@@ -75,7 +79,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async ({ name, email, password }) => {
-    const data = await authApi.register({ name, email, password });
+    const normalizedName = String(name ?? '').trim();
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    const data = await authApi.register({
+      name: normalizedName,
+      email: normalizedEmail,
+      password
+    });
+    if (!data?.token || !data?.user) {
+      throw new Error('Registration failed: invalid session response.');
+    }
     setStoredAuth(data.token, data.user);
     setToken(data.token);
     setUser(data.user);

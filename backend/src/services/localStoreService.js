@@ -3,9 +3,19 @@ import path from 'path';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { env } from '../config/env.js';
+import { AppError } from '../utils/AppError.js';
+import { BCRYPT_HASH_REGEX } from '../models/User.js';
 import { NOT_FOUND_MESSAGE } from '../prompts/ragPrompt.js';
 
-const storeFilePath = path.join(env.uploadsDir, '.local_data_store.json');
+const isTestEnv = process.env.NODE_ENV === 'test';
+const storeFilePath = path.join(
+  env.uploadsDir,
+  isTestEnv ? '.local_data_store.test.json' : '.local_data_store.json'
+);
+const usersBackupFilePath = path.join(
+  env.uploadsDir,
+  isTestEnv ? '.local_users_store.test.json' : '.local_users_store.json'
+);
 
 const defaultData = () => ({
   users: [],
@@ -15,31 +25,114 @@ const defaultData = () => ({
   vectors: []
 });
 
-const loadStore = () => {
-  try {
-    if (!fs.existsSync(storeFilePath)) {
-      return defaultData();
-    }
-    const raw = fs.readFileSync(storeFilePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return {
-      users: Array.isArray(parsed.users) ? parsed.users : [],
-      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
-      conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
-      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
-      vectors: Array.isArray(parsed.vectors) ? parsed.vectors : []
-    };
-  } catch {
-    return defaultData();
+let memoryStore = null;
+
+const atomicWriteJsonSync = (targetPath, payload) => {
+  if (!fs.existsSync(env.uploadsDir)) {
+    fs.mkdirSync(env.uploadsDir, { recursive: true });
   }
+  const serialized = JSON.stringify(payload, null, 2);
+  const tempPath = `${targetPath}.tmp.${process.pid}.${Date.now()}.${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+  try {
+    fs.writeFileSync(tempPath, serialized, 'utf-8');
+    fs.renameSync(tempPath, targetPath);
+  } catch {
+    try {
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+    } catch {
+      // Ignore cleanup error
+    }
+    fs.writeFileSync(targetPath, serialized, 'utf-8');
+  }
+};
+
+const readJsonFileSafe = (filePath) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    if (!raw || !raw.trim()) {
+      return null;
+    }
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const mergeUsersLists = (primaryUsers = [], backupUsers = []) => {
+  const byEmail = new Map();
+  for (const candidate of [...backupUsers, ...primaryUsers]) {
+    if (!candidate || !candidate.email || !candidate.password) {
+      continue;
+    }
+    const normalizedEmail = String(candidate.email).trim().toLowerCase();
+    if (!normalizedEmail) {
+      continue;
+    }
+    byEmail.set(normalizedEmail, {
+      ...candidate,
+      _id: String(candidate._id || generateObjectIdHex()),
+      name: String(candidate.name || 'User').trim(),
+      email: normalizedEmail
+    });
+  }
+  return Array.from(byEmail.values());
+};
+
+const loadStore = () => {
+  const parsedMain = readJsonFileSafe(storeFilePath);
+  const parsedBackupUsers = readJsonFileSafe(usersBackupFilePath);
+  const backupUsersList = Array.isArray(parsedBackupUsers?.users)
+    ? parsedBackupUsers.users
+    : Array.isArray(parsedBackupUsers)
+    ? parsedBackupUsers
+    : [];
+
+  if (!parsedMain) {
+    if (memoryStore) {
+      return memoryStore;
+    }
+    const initial = defaultData();
+    initial.users = mergeUsersLists([], backupUsersList);
+    memoryStore = initial;
+    return memoryStore;
+  }
+
+  const mergedUsers = mergeUsersLists(
+    Array.isArray(parsedMain.users) ? parsedMain.users : [],
+    backupUsersList.length > 0
+      ? backupUsersList
+      : Array.isArray(memoryStore?.users)
+      ? memoryStore.users
+      : []
+  );
+
+  memoryStore = {
+    users: mergedUsers,
+    documents: Array.isArray(parsedMain.documents) ? parsedMain.documents : [],
+    conversations: Array.isArray(parsedMain.conversations)
+      ? parsedMain.conversations
+      : [],
+    messages: Array.isArray(parsedMain.messages) ? parsedMain.messages : [],
+    vectors: Array.isArray(parsedMain.vectors) ? parsedMain.vectors : []
+  };
+
+  return memoryStore;
 };
 
 const saveStore = (data) => {
   try {
-    if (!fs.existsSync(env.uploadsDir)) {
-      fs.mkdirSync(env.uploadsDir, { recursive: true });
+    memoryStore = data;
+    atomicWriteJsonSync(storeFilePath, data);
+    if (Array.isArray(data.users)) {
+      atomicWriteJsonSync(usersBackupFilePath, { users: data.users });
     }
-    fs.writeFileSync(storeFilePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to persist local fallback store:', err.message);
   }
@@ -50,30 +143,111 @@ export const generateObjectIdHex = () => {
 };
 
 export const localUserStore = {
+  listAll: () => {
+    const store = loadStore();
+    return Array.isArray(store.users) ? [...store.users] : [];
+  },
   findByEmail: (email) => {
     const store = loadStore();
-    const normalized = String(email || '').toLowerCase().trim();
-    return store.users.find((u) => u.email === normalized) || null;
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    return (
+      store.users.find(
+        (u) => String(u.email || '').trim().toLowerCase() === normalized
+      ) || null
+    );
   },
   findById: (id) => {
     const store = loadStore();
-    return store.users.find((u) => u._id === String(id)) || null;
+    const targetId = String(id || '').trim();
+    if (!targetId) {
+      return null;
+    }
+    return store.users.find((u) => String(u._id) === targetId) || null;
   },
-  create: async ({ name, email, password }) => {
+  create: async ({ _id, name, email, password, createdAt, updatedAt }) => {
     const store = loadStore();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const trimmedName = String(name || '').trim();
+
+    const existing = store.users.find(
+      (u) => String(u.email || '').trim().toLowerCase() === normalizedEmail
+    );
+    if (existing) {
+      throw new AppError(
+        'An account with this email address already exists.',
+        409,
+        'EMAIL_ALREADY_EXISTS'
+      );
+    }
+
     const now = new Date().toISOString();
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const rawPasswordStr = String(password || '');
+    const hashedPassword = BCRYPT_HASH_REGEX.test(rawPasswordStr)
+      ? rawPasswordStr
+      : await bcrypt.hash(rawPasswordStr, 12);
+
     const newUser = {
-      _id: generateObjectIdHex(),
-      name: String(name).trim(),
-      email: String(email).toLowerCase().trim(),
+      _id: _id ? String(_id) : generateObjectIdHex(),
+      name: trimmedName,
+      email: normalizedEmail,
       password: hashedPassword,
-      createdAt: now,
-      updatedAt: now
+      createdAt: createdAt ? new Date(createdAt).toISOString() : now,
+      updatedAt: updatedAt ? new Date(updatedAt).toISOString() : now
     };
     store.users.push(newUser);
     saveStore(store);
     return newUser;
+  },
+  upsertSyncedUser: (userRecord) => {
+    if (!userRecord || !userRecord.email || !userRecord.password) {
+      return null;
+    }
+    const store = loadStore();
+    const normalizedEmail = String(userRecord.email).trim().toLowerCase();
+    const userIdStr = String(userRecord._id || userRecord.id || generateObjectIdHex());
+    const now = new Date().toISOString();
+
+    const normalizedRecord = {
+      _id: userIdStr,
+      name: String(userRecord.name || 'User').trim(),
+      email: normalizedEmail,
+      password: String(userRecord.password),
+      createdAt: userRecord.createdAt
+        ? new Date(userRecord.createdAt).toISOString()
+        : now,
+      updatedAt: userRecord.updatedAt
+        ? new Date(userRecord.updatedAt).toISOString()
+        : now
+    };
+
+    const existingIdx = store.users.findIndex(
+      (u) =>
+        String(u.email || '').trim().toLowerCase() === normalizedEmail ||
+        String(u._id) === userIdStr
+    );
+
+    if (existingIdx >= 0) {
+      store.users[existingIdx] = {
+        ...store.users[existingIdx],
+        ...normalizedRecord
+      };
+    } else {
+      store.users.push(normalizedRecord);
+    }
+
+    saveStore(store);
+    return normalizedRecord;
+  },
+  clearTestUsers: () => {
+    if (process.env.NODE_ENV !== 'test') {
+      return;
+    }
+    const store = loadStore();
+    store.users = [];
+    saveStore(store);
   }
 };
 

@@ -37,15 +37,19 @@ const startUnifiedServer = async () => {
 
   app.use(errorHandler);
 
+  if (env.mongodbUri) {
+    try {
+      await connectDatabase(env.mongodbUri);
+      console.log(`Connected to MongoDB database (${env.mongodbDbName})`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`MongoDB connection fallback active: ${message}`);
+    }
+  }
+
   const port = 3000;
   app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${port}`);
-    if (env.mongodbUri) {
-      connectDatabase(env.mongodbUri).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`MongoDB connection fallback active: ${message}`);
-      });
-    }
   });
 };
 

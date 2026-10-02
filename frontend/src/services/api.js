@@ -29,7 +29,10 @@ export const getStoredUser = () => {
 };
 
 const resolveApiBaseUrl = () => {
-  const rawEnvUrl = String(import.meta.env.VITE_API_URL || '').trim();
+  const rawEnvUrl = String(import.meta.env.VITE_API_URL || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .replace(/\/+$/, '');
   if (!rawEnvUrl || rawEnvUrl.startsWith('MY_')) {
     return '/api';
   }
@@ -52,7 +55,10 @@ const resolveApiBaseUrl = () => {
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
-  timeout: 180000
+  timeout: 180000,
+  headers: {
+    Accept: 'application/json'
+  }
 });
 
 api.interceptors.request.use(
@@ -77,9 +83,10 @@ api.interceptors.response.use(
       originalConfig.baseURL !== '/api'
     ) {
       originalConfig._retriedWithRelativeApi = true;
-      originalConfig.baseURL = '/api';
-      api.defaults.baseURL = '/api';
-      return api.request(originalConfig);
+      return api.request({
+        ...originalConfig,
+        baseURL: '/api'
+      });
     }
 
     const status = error.response?.status;
@@ -115,17 +122,56 @@ export const extractApiErrorMessage = (error, fallback = 'An unexpected error oc
   return fallback;
 };
 
+const ensureValidAuthResponse = (data, defaultErrorMessage) => {
+  if (!data || typeof data !== 'object') {
+    throw new Error(
+      'Received an invalid response from the backend server. Ensure the backend API is running.'
+    );
+  }
+  if (data.success === false) {
+    throw new Error(data.message || defaultErrorMessage);
+  }
+  if (
+    typeof data.token !== 'string' ||
+    !data.token.trim() ||
+    !data.user ||
+    typeof data.user !== 'object' ||
+    !data.user.email
+  ) {
+    throw new Error(data.message || defaultErrorMessage);
+  }
+  return data;
+};
+
 export const authApi = {
-  register: async (payload) => {
+  register: async ({ name, email, password }) => {
+    const payload = {
+      name: String(name ?? '').trim(),
+      email: String(email ?? '').trim().toLowerCase(),
+      password: String(password ?? '')
+    };
     const { data } = await api.post('/auth/register', payload);
-    return data;
+    return ensureValidAuthResponse(
+      data,
+      'Registration failed. Unable to verify saved account.'
+    );
   },
-  login: async (payload) => {
+  login: async ({ email, password }) => {
+    const payload = {
+      email: String(email ?? '').trim().toLowerCase(),
+      password: String(password ?? '')
+    };
     const { data } = await api.post('/auth/login', payload);
-    return data;
+    return ensureValidAuthResponse(
+      data,
+      'Login failed. Please check your email and password.'
+    );
   },
   getMe: async () => {
     const { data } = await api.get('/auth/me');
+    if (!data || typeof data !== 'object' || !data.user || !data.user.email) {
+      throw new Error('Unable to verify current user session.');
+    }
     return data;
   }
 };

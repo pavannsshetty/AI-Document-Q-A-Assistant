@@ -1,15 +1,46 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const currentFilename = fileURLToPath(import.meta.url);
 const currentDirname = path.dirname(currentFilename);
 
-dotenv.config({ path: path.resolve(currentDirname, '../../.env'), quiet: true });
-dotenv.config({ quiet: true });
+const backendEnvPath = path.resolve(currentDirname, '../../.env');
+const rootEnvPath = path.resolve(currentDirname, '../../../.env');
+
+const loadEnvFileWithoutEmptyLocks = (envFilePath) => {
+  try {
+    if (!fs.existsSync(envFilePath)) {
+      return;
+    }
+    const raw = fs.readFileSync(envFilePath, 'utf-8');
+    const parsed = dotenv.parse(raw);
+    for (const [key, val] of Object.entries(parsed)) {
+      const existing = process.env[key];
+      const cleanedVal = String(val || '').trim();
+      if (
+        (existing === undefined || String(existing).trim() === '') &&
+        cleanedVal !== ''
+      ) {
+        process.env[key] = cleanedVal;
+      }
+    }
+  } catch {
+    // Ignore unreadable .env file and fall back to process.env defaults
+  }
+};
+
+loadEnvFileWithoutEmptyLocks(backendEnvPath);
+loadEnvFileWithoutEmptyLocks(rootEnvPath);
+dotenv.config({ path: backendEnvPath, quiet: true });
+dotenv.config({ path: rootEnvPath, quiet: true });
 
 const cleanEnvString = (value, fallback) => {
-  const trimmed = String(value || '').trim();
+  const trimmed = String(value || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
   if (!trimmed || trimmed.startsWith('MY_')) {
     return fallback;
   }
@@ -29,7 +60,14 @@ const toFloat = (value, fallback) => {
 export const env = {
   port: toInt(process.env.PORT, 5000),
   nodeEnv: cleanEnvString(process.env.NODE_ENV, 'development'),
-  mongodbUri: cleanEnvString(process.env.MONGODB_URI, ''),
+  mongodbUri: cleanEnvString(
+    process.env.MONGODB_URI || process.env.MONGO_URI || process.env.DATABASE_URL,
+    ''
+  ),
+  mongodbDbName: cleanEnvString(
+    process.env.MONGODB_DB_NAME || process.env.DB_NAME,
+    'ai_document_qa'
+  ),
   jwtSecret: cleanEnvString(
     process.env.JWT_SECRET,
     'local_dev_jwt_secret_change_in_production_env'

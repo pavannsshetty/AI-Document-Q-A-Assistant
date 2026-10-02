@@ -1,6 +1,10 @@
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { env } from '../config/env.js';
+import {
+  ensureDatabaseConnected,
+  syncSingleUserToMongo
+} from '../config/db.js';
 import { User } from '../models/User.js';
 import { localUserStore } from '../services/localStoreService.js';
 import { AppError } from '../utils/AppError.js';
@@ -33,9 +37,22 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   const token = authHeader.slice(7).trim();
   const decoded = verifyTokenString(token);
 
+  if (mongoose.connection.readyState === 2) {
+    await ensureDatabaseConnected();
+  }
+
   let user = null;
   if (mongoose.connection.readyState === 1) {
-    user = await User.findById(decoded.userId).lean();
+    if (mongoose.Types.ObjectId.isValid(String(decoded.userId))) {
+      user = await User.findById(decoded.userId).lean();
+    }
+    if (!user) {
+      const localUser = localUserStore.findById(decoded.userId);
+      if (localUser) {
+        const synced = await syncSingleUserToMongo(localUser);
+        user = synced || localUser;
+      }
+    }
   } else {
     user = localUserStore.findById(decoded.userId);
   }

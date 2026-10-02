@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.js';
 import { extractApiErrorMessage } from '../services/api.js';
@@ -17,20 +17,29 @@ export const RegisterPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (loading || submittingRef.current) {
+      return;
+    }
     setError('');
 
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
+    const trimmedName = name.trim().replace(/\s+/g, ' ');
+    const normalizedEmail = email.trim().toLowerCase();
 
     if (trimmedName.length < 2) {
       setError('Name must be at least 2 characters long.');
       return;
     }
 
-    if (!trimmedEmail || !/^\S+@\S+\.\S+$/.test(trimmedEmail)) {
+    if (trimmedName.length > 80) {
+      setError('Name cannot exceed 80 characters.');
+      return;
+    }
+
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setError('Please enter a valid email address.');
       return;
     }
@@ -46,18 +55,22 @@ export const RegisterPage = () => {
     }
 
     try {
+      submittingRef.current = true;
       setLoading(true);
-      await register({
+      const result = await register({
         name: trimmedName,
-        email: trimmedEmail,
+        email: normalizedEmail,
         password
       });
-      navigate('/dashboard');
+      if (result?.token && result?.user) {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       setError(
         extractApiErrorMessage(err, 'Registration failed. Please try again.')
       );
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };

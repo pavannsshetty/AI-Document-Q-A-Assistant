@@ -5,12 +5,16 @@ import { checkOllamaHealth } from './services/ollamaService.js';
 import { checkQdrantHealth } from './services/qdrantService.js';
 
 const startServer = async () => {
-  try {
-    await connectDatabase();
-    console.log(`Connected to MongoDB at ${env.mongodbUri}`);
-  } catch (error) {
-    console.error(`Warning: ${error.message}`);
-    console.error('Ensure MongoDB or MongoDB Atlas is running and MONGODB_URI is set in .env');
+  if (env.mongodbUri) {
+    try {
+      await connectDatabase();
+      console.log(`Connected to MongoDB database (${env.mongodbDbName})`);
+    } catch (error) {
+      console.error(`Warning: ${error.message}`);
+      console.error('Ensure MongoDB or MongoDB Atlas is running and MONGODB_URI is set in .env');
+    }
+  } else {
+    console.warn('Warning: MONGODB_URI is not set in .env. Using local persistence store.');
   }
 
   const [ollamaStatus, qdrantStatus] = await Promise.all([
